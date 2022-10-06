@@ -2,41 +2,47 @@ package sources
 
 import (
 	"context"
+
 	"github.com/ferryvg/go-feeds-aggregator/internal/domain"
 	"golang.org/x/sync/errgroup"
-	"sync"
 )
-
-type Stack struct {
-	items []domain.FeedItem
-	mu    *sync.RWMutex
-}
-
-func (s *Stack) Add(items ...domain.FeedItem) {
-	s.mu.Lock()
-
-	s.items = append(s.items, items...)
-
-	s.mu.Unlock()
-}
-
-func (s *Stack) All() []domain.FeedItem {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	return s.items
-}
 
 type CompoundAdapter struct {
 	adapters []SourceAdapter
 }
 
-func (c *CompoundAdapter) Load(ctx context.Context, limit int) ([]domain.FeedItem, error) {
+func NewCompoundAdapter(adapters ...SourceAdapter) *CompoundAdapter {
+	return &CompoundAdapter{
+		adapters: adapters,
+	}
+}
+
+func (c *CompoundAdapter) Init() error {
+	for _, adapter := range c.adapters {
+		if err := adapter.Init(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *CompoundAdapter) Stop() {
+	for _, adapter := range c.adapters {
+		adapter.Stop()
+	}
+}
+
+func (c *CompoundAdapter) Load(ctx context.Context, limit int) ([]*domain.FeedItem, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
 	perSource := limit / len(c.adapters)
 
 	group, ctx := errgroup.WithContext(ctx)
 
-	stack := new(Stack)
+	stack := NewStack()
 
 	for _, adapter := range c.adapters {
 		current := adapter
@@ -52,7 +58,11 @@ func (c *CompoundAdapter) Load(ctx context.Context, limit int) ([]domain.FeedIte
 		})
 	}
 
-	// TODO: sort stack
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
 
-	return stack.All(), group.Wait()
+	stack.SortByDate()
+
+	return stack.All(), nil
 }

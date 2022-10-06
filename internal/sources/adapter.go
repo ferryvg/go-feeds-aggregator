@@ -6,5 +6,7 @@ import (
 )
 
 type SourceAdapter interface {
-	Load(ctx context.Context, limit int) ([]domain.FeedItem, error)
+	Load(ctx context.Context, limit int) ([]*domain.FeedItem, error)
+	Init() error
+	Stop()
 }
